@@ -1,0 +1,8 @@
+{
+    "board": "arduino:avr:unowifi",
+    "sketch": "code/main.ino",
+    "port": "/dev/ttyUSB0",
+    "baud": 115200,
+    "verbose": true,
+    "upload": true
+}
