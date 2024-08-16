@@ -1,6 +1,4 @@
 
-WEPAPIKEY=AIzaSyBY-ACQerVAfWBSM3xdUgofaLQ_JowjcU4
-
 <details>
 <summary>Code</summary >
 
