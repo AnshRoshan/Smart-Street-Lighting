@@ -1,0 +1,72 @@
+#include <NewPing.h>
+
+// Pin definitions
+const byte LDR_PIN = A0;
+const byte TRIG_PINS[] = {13, 2};
+const byte ECHO_PINS[] = {12, 7};
+const byte LED_PINS[] = {11, 5};
+const unsigned int MAX_DISTANCE = 200;
+
+// Create NewPing objects for each sensor
+NewPing sonar1(TRIG_PINS[0], ECHO_PINS[0], MAX_DISTANCE);
+NewPing sonar2(TRIG_PINS[1], ECHO_PINS[1], MAX_DISTANCE);
+
+// Variables
+int lightIntensity;
+float distanceCm[2];
+String currentTime = "";
+unsigned long ledOnStartTime[2] = {0, 0};
+unsigned long ledOnDuration[2] = {0, 0};
+bool ledState[2] = {false, false};
+unsigned long lastSendTime = 0;			 // Last time data was sent
+const unsigned long sendInterval = 5000; // 1 minute in milliseconds
+const int NIGHT_START = 18;				 // 6 PM
+const int NIGHT_END = 6;				 // 6 AM
+
+void setup()
+{
+	Serial.begin(115200);
+	for (int i = 0; i < 2; i++)
+	{
+		pinMode(LED_PINS[i], OUTPUT);
+		analogWrite(LED_PINS[i], 0);
+	}
+	pinMode(LDR_PIN, INPUT);
+}
+
+void loop()
+{
+	// Generate random LED duration for testing
+	generateRandomLEDLog();
+
+	// Simulate data being sent every minute
+	unsigned long currentMillis = millis();
+	if (currentMillis - lastSendTime >= sendInterval)
+	{
+		// Send random data
+		sendRandomLEDLogToESP();
+		lastSendTime = currentMillis;
+	}
+
+	// Keep some delay to avoid excessive serial output
+	delay(500);
+}
+
+void generateRandomLEDLog()
+{
+	// Randomly simulate LED duration
+	for (int i = 0; i < 2; i++)
+	{
+		ledOnDuration[i] = random(0, 100); // Random duration from 0 to 100 seconds ( hour)
+	}
+}
+
+void sendRandomLEDLogToESP()
+{
+	Serial.print("LED_1_Duration: ");
+	Serial.print(ledOnDuration[0]);
+	Serial.print(" , ");
+	Serial.print("LED_2_Duration: ");
+	Serial.print(ledOnDuration[1]);
+	Serial.println();
+}

@@ -1,0 +1,137 @@
+// Include required libraries
+#if defined(ESP32)
+#include <WiFi.h>
+#elif defined(ESP8266)
+#include <ESP8266WiFi.h>
+#endif
+#include <Firebase_ESP_Client.h>
+#include <addons/TokenHelper.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
+
+// Define WiFi credentials
+#define WIFI_SSID "AR"
+#define WIFI_PASSWORD "orionpax"
+
+// Define Firebase API Key, Project ID, and user credentials
+#define API_KEY "AIzaSyBY-ACQerVAfWBSM3xdUgofaLQ_JowjcU4"
+#define FIREBASE_PROJECT_ID "bce-ansh"
+#define USER_EMAIL "ansh@email.com"
+#define USER_PASSWORD "ansh@20329"
+
+// Define Firebase Data object, Firebase authentication, and configuration
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+
+// NTP Client to get time
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 19800, 60000); // 19800 sec offset for IST (GMT+5:30)
+
+void setup()
+{
+    // Initialize serial communication for debugging
+    Serial.begin(115200);
+
+    // Connect to Wi-Fi
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    Serial.print("Connecting to Wi-Fi");
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.print(".");
+        delay(300);
+    }
+    Serial.println();
+    Serial.print("Connected with IP: ");
+    Serial.println(WiFi.localIP());
+    Serial.println();
+
+    // Initialize the NTP client
+    timeClient.begin();
+
+    // Print Firebase client version
+    Serial.printf("Firebase Client v%s\n\n", FIREBASE_CLIENT_VERSION);
+
+    // Assign the API key
+    config.api_key = API_KEY;
+
+    // Assign the user sign-in credentials
+    auth.user.email = USER_EMAIL;
+    auth.user.password = USER_PASSWORD;
+
+    // Assign the callback function for the long-running token generation task
+    config.token_status_callback = tokenStatusCallback; // see addons/TokenHelper.h
+
+    // Begin Firebase with configuration and authentication
+    Firebase.begin(&config, &auth);
+
+    // Reconnect to Wi-Fi if necessary
+    Firebase.reconnectWiFi(true);
+}
+
+void loop()
+{
+    // Update the NTP client
+    timeClient.update();
+
+    // Format the time to "1:23:34 PM"
+    int hours = timeClient.getHours();
+    int minutes = timeClient.getMinutes();
+    int seconds = timeClient.getSeconds();
+
+    String am_pm = (hours >= 12) ? "PM" : "AM";
+    if (hours > 12)
+    {
+        hours -= 12;
+    }
+    else if (hours == 0)
+    {
+        hours = 12;
+    }
+
+    String timeFormatted = String(hours) + "-" + (minutes < 10 ? "0" : "") + String(minutes) + "-" + (seconds < 10 ? "0" : "") + String(seconds) + "-" + am_pm;
+
+    // Define the path to the Firestore document
+    String documentPath = "EspData/"+timeFormatted;
+
+    // Create a FirebaseJson object for storing time, temperature, and humidity data
+    FirebaseJson content;
+    content.set("fields/Time/stringValue", timeFormatted);
+
+    // Generate random temperature and humidity values within a realistic range
+    float temperature = random(150, 400) / 10.0; // Range from 15.0 to 40.0
+    float humidity = random(300, 900) / 10.0;    // Range from 30.0 to 90.0
+
+    // Print temperature and humidity values
+    Serial.print("Temperature: ");
+    Serial.println(temperature);
+    Serial.print("Humidity: ");
+    Serial.println(humidity);
+
+    // Check if the values are valid (not NaN)
+    if (!isnan(temperature) && !isnan(humidity))
+    {
+        // Set the 'Temperature' and 'Humidity' fields in the FirebaseJson object
+        content.set("fields/Temperature/stringValue", String(temperature, 3));
+        content.set("fields/Humidity/stringValue", String(humidity, 3));
+
+        Serial.print("Update/Add Data... ");
+
+        // Use the patchDocument method to update the Firestore document
+        if (Firebase.Firestore.patchDocument(&fbdo, FIREBASE_PROJECT_ID, "", documentPath.c_str(), content.raw(), "Time,Temperature,Humidity"))
+        {
+            Serial.printf("ok\n%s\n\n", fbdo.payload().c_str());
+        }
+        else
+        {
+            Serial.println(fbdo.errorReason());
+        }
+    }
+    else
+    {
+        Serial.println("Failed to read data.");
+    }
+
+    // Delay before the next reading
+    delay(7000);
+}
