@@ -38,17 +38,7 @@ void setup()
     Serial.begin(115200);
 
     // Connect to Wi-Fi
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    Serial.print("Connecting to Wi-Fi");
-    while (WiFi.status() != WL_CONNECTED)
-    {
-        Serial.print(".");
-        delay(300);
-    }
-    Serial.println();
-    Serial.print("Connected with IP: ");
-    Serial.println(WiFi.localIP());
-    Serial.println();
+    connectToWiFi();
 
     // Initialize the NTP client
     timeClient.begin();
@@ -78,81 +68,128 @@ void loop()
     // Update the NTP client
     timeClient.update();
 
-    // Get the epoch time from the NTP client
-    unsigned long epochTime = timeClient.getEpochTime();
+    // Get the formatted current time
+    String timeFormatted = getFormattedTime();
 
-    // Convert epoch time to time structure
-    struct tm *ptm = localtime((time_t *)&epochTime);
+    // Send the current time to ATmega for synchronization
+    sendTimeToAtmega(timeFormatted);
 
-    // Extract time components
-    int hours = ptm->tm_hour;
-    int day = ptm->tm_mday;
-    int month = ptm->tm_mon;        // Months are 0-11
-    int year = ptm->tm_year + 1900; // Years since 1900
-    int minutes = ptm->tm_min;
-    int seconds = ptm->tm_sec;
-    int weekDay = ptm->tm_wday; // Day of the week (0 = Sunday, 6 = Saturday)
-
-    // Format time components
-    String yearStr = String(year);
-    String monthStr = months[month]; // Month name
-    String dayStr = (day < 10 ? "0" : "") + String(day);
-    String hourStr = (hours < 10 ? "0" : "") + String(hours);
-    String minStr = (minutes < 10 ? "0" : "") + String(minutes);
-    String secStr = (seconds < 10 ? "0" : "") + String(seconds);
-    String weekDayStr = weekDays[weekDay]; // Weekday name
-
-    // Format as 'YYYY-MonthName-DDTHH:MM:SS-Weekday'
-    String timeFormatted = yearStr + "-" + monthStr + "-" + dayStr + "T" + hourStr + ":" + minStr + ":" + secStr + "-" + weekDayStr;
-
-    // Print the time to serial
-    String timeam = hourStr + ":" + minStr;
-
-    // Send current time to ATmega for synchronization
-    Serial.println(timeam);
-
-    // Check if there's any incoming data from ATmega
+    // Check and process incoming data from ATmega
     if (Serial.available())
     {
         String ledLog = Serial.readStringUntil('\n');
         Serial.print("Received LED Log: ");
         Serial.println(ledLog);
 
-        // Parse the log for LED and LDR values
-        int led1Start = ledLog.indexOf("LED1:") + 5;
-        int led1End = ledLog.indexOf(",LED2:");
-        String led1Duration = ledLog.substring(led1Start, led1End);
-
-        int led2Start = led1End + 6;
-        int led2End = ledLog.indexOf(",LED3:");
-        String led2Duration = ledLog.substring(led2Start, led2End);
-
-        int led3Start = led2End + 6;
-        int led3End = ledLog.indexOf(",LDR:");
-        String led3Duration = ledLog.substring(led3Start, led3End);
-
-        int ldrStart = led3End + 5;
-        String ldrValue = ledLog.substring(ldrStart);
-
-        // Create a FirebaseJson object for storing time, LED1Duration, LED2Duration, LED3Duration, and LDR value
-        FirebaseJson content;
-        content.set("fields/LED1/stringValue", led1Duration == "Not Working" ? "Sensor not working" : led1Duration);
-        content.set("fields/LED2/stringValue", led2Duration == "Not Working" ? "Sensor not working" : led2Duration);
-        content.set("fields/LED3/stringValue", led3Duration == "Not Working" ? "Sensor not working" : led3Duration);
-        content.set("fields/LDR/stringValue", ldrValue);
-
-        // Create document path for Firestore
-        String documentPath = "LEDLogs/" + timeFormatted;
-
-        // Update Firestore document with the new data
-        if (Firebase.Firestore.patchDocument(&fbdo, FIREBASE_PROJECT_ID, "", documentPath.c_str(), content.raw(), "LED1,LED2,LED3,LDR"))
+        // Parse and send data to Firebase
+        if (parseAndSendData(ledLog, timeFormatted))
         {
-            Serial.printf("ok\n%s\n\n", fbdo.payload().c_str());
+            Serial.println("Data parsed and sent successfully.");
         }
         else
         {
-            Serial.println(fbdo.errorReason());
+            Serial.println("Failed to parse data.");
         }
-        delay(1000);
+    }
+
+    delay(500);
+}
+
+void connectToWiFi()
+{
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    Serial.print("Connecting to Wi-Fi");
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.print(".");
+        delay(300);
+    }
+    Serial.println();
+    Serial.print("Connected with IP: ");
+    Serial.println(WiFi.localIP());
+    Serial.println();
+}
+
+String getFormattedTime()
+{
+    // Get the epoch time from the NTP client
+    unsigned long epochTime = timeClient.getEpochTime();
+
+    // Extract the hours, minutes, and seconds from the epoch time
+    int currentHour = timeClient.getHours();
+    int currentMinute = timeClient.getMinutes();
+    int currentSecond = timeClient.getSeconds();
+
+    // Convert time components to strings with leading zeros
+    String hourString = currentHour < 10 ? "0" + String(currentHour) : String(currentHour);
+    String minuteString = currentMinute < 10 ? "0" + String(currentMinute) : String(currentMinute);
+    String secondString = currentSecond < 10 ? "0" + String(currentSecond) : String(currentSecond);
+
+    // Format the time string in HH:MM:SS format
+    String formattedTime = hourString + ":" + minuteString + ":" + secondString;
+
+    return formattedTime;
+}
+
+void sendTimeToAtmega(String timeFormatted)
+{
+    Serial.print(timeFormatted);
+    Serial.print("\n");
+}
+
+// Function to parse and send data to Firebase
+bool parseAndSendData(String ledLog, String timeFormatted)
+{
+    // Expected format: "Sensor Data - LED1:10 cm,LED2:15 cm,LED3:20 cm,LDR:500"
+    int index1 = ledLog.indexOf("LED1:");
+    int index2 = ledLog.indexOf(",LED2:");
+    int index3 = ledLog.indexOf(",LED3:");
+    int index4 = ledLog.indexOf(",LDR:");
+
+    if (index1 == -1 || index2 == -1 || index3 == -1 || index4 == -1)
+    {
+        // Debug: Print error if any index is not found
+        Serial.println("Error: Incorrect data format received.");
+        return false;
+    }
+
+    String led1 = ledLog.substring(index1 + 5, index2);
+    String led2 = ledLog.substring(index2 + 6, index3);
+    String led3 = ledLog.substring(index3 + 6, index4);
+    String ldr = ledLog.substring(index4 + 5);
+
+    // Debug: Print parsed values for verification
+    Serial.println("Parsed Values:");
+    Serial.print("LED1: ");
+    Serial.println(led1);
+    Serial.print("LED2: ");
+    Serial.println(led2);
+    Serial.print("LED3: ");
+    Serial.println(led3);
+    Serial.print("LDR: ");
+    Serial.println(ldr);
+
+    // Prepare data to send to Firebase
+    FirebaseJson json;
+    json.set("fields/time/STRING_VALUE", timeFormatted);
+    json.set("fields/LED1/STRING_VALUE", led1);
+    json.set("fields/LED2/STRING_VALUE", led2);
+    json.set("fields/LED3/STRING_VALUE", led3);
+    json.set("fields/LDR/STRING_VALUE", ldr);
+
+    // Construct the Firebase path using the current timestamp
+    String documentPath = "ledLog/" + String(timeClient.getEpochTime());
+
+    // Send data to Firebase
+    if (Firebase.Firestore.createDocument(&fbdo, FIREBASE_PROJECT_ID, "", documentPath.c_str(), json))
+    {
+        Serial.println("Data sent successfully to Firebase");
+        return true;
+    }
+    else
+    {
+        Serial.print("Error sending data to Firebase: ");
+        Serial.println(fbdo.errorReason());
+        return false;
     }
 }
